@@ -1,6 +1,6 @@
 import Foundation
 
-let appVersion = "1.0.0-beta.2"
+let appVersion = "1.0.0"
 let bypassGateway = "192.168.1.192"
 
 struct SwitchError: LocalizedError {

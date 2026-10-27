@@ -80,7 +80,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
         let title = NSTextField(labelWithString: "旁路由切换")
         title.font = .systemFont(ofSize: 29, weight: .bold)
-        let subtitle = NSTextField(labelWithString: "NETWORK SWITCH  /  MACOS BETA")
+        let subtitle = NSTextField(labelWithString: "NETWORK SWITCH  /  MACOS")
         subtitle.font = .monospacedSystemFont(ofSize: 11, weight: .medium)
         subtitle.textColor = .systemCyan
         let heading = NSStackView(views: [title, subtitle]); heading.orientation = .vertical; heading.alignment = .leading

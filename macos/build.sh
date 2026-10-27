@@ -2,7 +2,7 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 OUT="$ROOT/build"
-VERSION="1.0.0-beta.2"
+VERSION="1.0.0"
 APP="$OUT/NetworkSwitch.app"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$OUT/AppIcon.iconset"
 SDK="$(xcrun --sdk macosx --show-sdk-path)"
@@ -29,7 +29,7 @@ xcrun swiftc -swift-version 5 "$ROOT/Core.swift" "$ROOT/Tests.swift" -o "$OUT/Co
 "$OUT/CoreTests" | tee "$OUT/TEST-RESULTS.txt"
 "$APP/Contents/MacOS/NetworkSwitch" --inspect-json > "$OUT/READ-ONLY-SMOKE.json"
 "$APP/Contents/MacOS/NetworkSwitch" --render-preview "$OUT/preview-macOS.png"
-printf '\nBuild: arm64 + x86_64; bundle signature verified; read-only macOS inspection passed.\nReal network switching, sleep/wake and reboot: NOT tested.\n' >> "$OUT/TEST-RESULTS.txt"
+printf '\nBuild: arm64 + x86_64; bundle signature verified; read-only macOS inspection passed.\nCI: real network switching, sleep/wake and reboot NOT tested.\n' >> "$OUT/TEST-RESULTS.txt"
 cp "$ROOT/README.md" "$OUT/README-macOS.md"
 ditto -c -k --sequesterRsrc --keepParent "$APP" "$OUT/NetworkSwitch-macOS-$VERSION-universal.zip"
 (cd "$OUT" && shasum -a 256 "NetworkSwitch-macOS-$VERSION-universal.zip" > SHA256SUMS-macOS.txt)
