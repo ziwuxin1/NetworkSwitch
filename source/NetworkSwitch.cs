@@ -16,7 +16,7 @@ using System.Windows.Forms;
 
 internal static class Program {
     internal static readonly string Root = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "MAXsGatewaySwitch");
-    internal static string Worker { get { return Path.Combine(Root, "NetworkWorker-2.3.0.ps1"); } }
+    internal static string Worker { get { return Path.Combine(Root, "NetworkWorker-2.3.1.ps1"); } }
     internal static bool Preview;
     internal static Dictionary<string, object> Map(object o) { return (Dictionary<string, object>)o; }
     internal static string Str(Dictionary<string, object> d, string key) { return d.ContainsKey(key) && d[key] != null ? Convert.ToString(d[key]) : ""; }
@@ -161,7 +161,7 @@ internal class MainForm : Form {
             menu.Items.Add("打开窗口",null,(s,e)=>{Show();WindowState=FormWindowState.Normal;Activate();});
             menu.Items.Add("退出（保留当前配置）",null,(s,e)=>{if(busy)return;exitRequested=true;Close();});
             menu.Items.Add("恢复并退出",null,async(s,e)=>{if(busy)return;await Execute("Restore");if(!hasBackup){exitRequested=true;Close();}else{Show();Activate();}});
-            tray=new NotifyIcon{Icon=SystemIcons.Application,Text="NetworkSwitch 2.3.0 · 重启保留",ContextMenuStrip=menu,Visible=true};
+            tray=new NotifyIcon{Icon=this.Icon??SystemIcons.Application,Text="NetworkSwitch 2.3.1 · 重启保留",ContextMenuStrip=menu,Visible=true};
             tray.DoubleClick+=(s,e)=>{Show();WindowState=FormWindowState.Normal;Activate();};
             maintenance.Start();
         }
@@ -189,7 +189,7 @@ internal class MainForm : Form {
     protected override void OnPaint(PaintEventArgs e){
         base.OnPaint(e);var g=e.Graphics;int w=ClientSize.Width,h=ClientSize.Height;Color accent=isActive?Theme.Yellow:Theme.Cyan;
         Box(g,Theme.Bar,0,0,w,32);Logo(g,12,8,16);Txt(g,"旁路由切换",12,Theme.Muted,36,0,200,32);
-        Logo(g,28,56,56);Txt(g,"旁路由切换",28,Theme.Text,100,53,230,38,true);using(var titleFont=Theme.Font(28,true)){int vx=100+TextRenderer.MeasureText(g,"旁路由切换",titleFont,Size.Empty,TextFormatFlags.NoPadding).Width+12;Txt(g,"v2.3.0",11,Theme.Cyan,vx,70,65,20,false,true);}
+        Logo(g,28,56,56);Txt(g,"旁路由切换",28,Theme.Text,100,53,230,38,true);using(var titleFont=Theme.Font(28,true)){int vx=100+TextRenderer.MeasureText(g,"旁路由切换",titleFont,Size.Empty,TextFormatFlags.NoPadding).Width+12;Txt(g,"v2.3.1",11,Theme.Cyan,vx,70,65,20,false,true);}
         Txt(g,message,12,accent,100,94,w-290,24);
         var tag=new Rectangle(w-163,57,135,27);using(var b=new SolidBrush(accent))g.FillPolygon(b,Theme.Cut(tag,8));
         Txt(g,busy?"NET::BUSY":hasBackup?(isActive?"NET::PROXY":"NET::CHECK"):"NET::READY",12,Theme.Bg,w-153,57,125,27,true,true);

@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/ziwuxin1/NetworkSwitch/releases/tag/v2.3.0"><img src="badge-version.svg" alt="Version v2.3.0"></a>
+  <a href="https://github.com/ziwuxin1/NetworkSwitch/releases/tag/v2.3.1"><img src="badge-version.svg" alt="Version v2.3.1"></a>
   <img src="badge-platform.svg" alt="Platform Windows">
   <img src="badge-ui.svg" alt="UI WinForms">
   <img src="badge-private.svg" alt="Private repository">
@@ -36,7 +36,7 @@
 
 在主路由与旁路由之间切换时，手动修改网关和 DNS 容易漏改，也不方便还原。**NetworkSwitch** 将这一步整理成两个操作：切到旁路由、恢复原配置。
 
-程序采用 C# WinForms 界面和 PowerShell 网络操作脚本。切换时保留 DHCP 地址和原默认网关，添加指向 `192.168.1.192` 的 IPv4 路由并设置 DNS，保存原配置用于恢复。**v2.3.0 开启后，退出程序和重启电脑都保留旁路由，直到手动恢复。**
+程序采用 C# WinForms 界面和 PowerShell 网络操作脚本。切换时保留 DHCP 地址和原默认网关，添加指向 `192.168.1.192` 的 IPv4 路由并设置 DNS，保存原配置用于恢复。**v2.3.1 开启后，退出程序和重启电脑都保留旁路由，直到手动恢复。**
 
 ## 功能一览
 
@@ -56,13 +56,13 @@
 
 ## 下载
 
-**[下载 NetworkSwitch v2.3.0 完整包](https://github.com/ziwuxin1/NetworkSwitch/releases/download/v2.3.0/NetworkSwitch-v2.3.0.zip)**
+**[下载 NetworkSwitch v2.3.1 完整包](https://github.com/ziwuxin1/NetworkSwitch/releases/download/v2.3.1/NetworkSwitch-v2.3.1.zip)**
 
 | 文件 | 用途 |
 | --- | --- |
-| [NetworkSwitch-v2.3.0.zip](https://github.com/ziwuxin1/NetworkSwitch/releases/download/v2.3.0/NetworkSwitch-v2.3.0.zip) | 推荐下载，包含 EXE、中文使用说明、源码及验证摘要。 |
-| [NetworkSwitch-Cyber-v2.3.0.exe](https://github.com/ziwuxin1/NetworkSwitch/releases/download/v2.3.0/NetworkSwitch-Cyber-v2.3.0.exe) | 独立程序，下载后直接运行。 |
-| [SHA256SUMS.txt](https://github.com/ziwuxin1/NetworkSwitch/releases/download/v2.3.0/SHA256SUMS.txt) | EXE 和 ZIP 的 SHA-256 校验值。 |
+| [NetworkSwitch-v2.3.1.zip](https://github.com/ziwuxin1/NetworkSwitch/releases/download/v2.3.1/NetworkSwitch-v2.3.1.zip) | 推荐下载，包含 EXE、中文使用说明、源码及验证摘要。 |
+| [NetworkSwitch-Cyber-v2.3.1.exe](https://github.com/ziwuxin1/NetworkSwitch/releases/download/v2.3.1/NetworkSwitch-Cyber-v2.3.1.exe) | 独立程序，下载后直接运行。 |
+| [SHA256SUMS.txt](https://github.com/ziwuxin1/NetworkSwitch/releases/download/v2.3.1/SHA256SUMS.txt) | EXE 和 ZIP 的 SHA-256 校验值。 |
 | [source/](source/) | 在线查看源码、构建脚本、图标和模拟测试。 |
 
 此仓库为私有仓库，下载需要登录具有访问权限的 GitHub 账号。正式版本及校验文件见 [Releases](https://github.com/ziwuxin1/NetworkSwitch/releases/latest)。
@@ -71,7 +71,7 @@
 
 1. 下载并解压完整 ZIP；旧版若仍在运行，先还原并退出（留意托盘）。
 2. 退出 Clash Verge 等电脑 VPN/TUN，避免与旁路由同时接管网络。
-3. 双击 `NetworkSwitch-Cyber-v2.3.0.exe`，允许管理员权限。
+3. 双击 `NetworkSwitch-Cyber-v2.3.1.exe`，允许管理员权限。
 4. 若提示 **「旧版临时配置」**，先点击 **「恢复自动」**，成功后再开启新版。
 5. 选择连接 `192.168.1.x/24` 家庭网络的网卡，点击 **「切到旁路由」**，确认显示 **「重启保留」**。
 6. 此后重启无需重新打开程序。需要恢复时，重新打开本版本并点击 **「恢复自动」**。
@@ -87,7 +87,7 @@
 - 后台只读检查。检测异常时不会反复切换，配置缺失时可点击「手动修复」。手动操作失败时会尝试回滚，恢复失败会保留备份供重试。
 - IPv6 保持原配置，不随 IPv4 网关切换。
 - 换网络或改用电脑 VPN 前，请先恢复原配置。IPv4 地址、其他网卡、MTU、路由器及 NAS 设置不在修改范围内。
-- 新版使用 Schema 2 恢复记录；开启后请使用 v2.3.0 或兼容版本还原，旧版无法处理持久路由备份。
+- 新版使用 Schema 2 恢复记录；开启后请使用 v2.3.1 或兼容版本还原，旧版无法处理持久路由备份。
 - 程序不提供代理节点。网页、视频或其他服务是否可用，取决于旁路由代理、DNS 和分流配置。
 
 ## 开发与构建
@@ -101,7 +101,7 @@
 构建脚本会将 `NetworkWorker.ps1`、程序图标及 manifest 嵌入 EXE，输出至项目根目录：
 
 ```text
-NetworkSwitch-Cyber-v2.3.0.exe
+NetworkSwitch-Cyber-v2.3.1.exe
 ```
 
 运行网络逻辑模拟检查：
@@ -128,10 +128,11 @@ NetworkSwitch-Cyber-v2.3.0.exe
 
 | 版本 | 内容 |
 | --- | --- |
-| **v2.3.0** | 路由与 DNS 重启后一起保留；恢复时清理两个路由表；后台只读检查；修复还原失败后又重新添加路由的问题；兼容旧版恢复记录。 |
+| **v2.3.1** | 修复托盘显示 Windows 默认图标，改用程序内嵌图标。 |
+| v2.3.0 | 路由与 DNS 重启后一起保留；恢复时清理两个路由表；后台只读检查；修复还原失败后又重新添加路由的问题；兼容旧版恢复记录。 |
 | v2.1.1 | Cyberpunk 界面、内嵌 Logo、自定义深色下拉框；历史版本仍可在 Releases 下载。 |
 
-**验证范围：**62 项模拟网络检查、15 项界面逻辑检查通过，覆盖模拟重启、还原后重启、部分失败回滚和旧版升级；编译、预览及真实 Windows 只读查询通过。尚未完成真实切换后的重启联网测试，模拟检查不等于实机验证。见 [验证摘要](docs/validation-v2.3.0.txt)。
+**本次验证：**v2.3.1 编译及内嵌图标提取通过，15 项模拟界面检查通过；未执行真实托盘目视检查或网络切换。见 [本次验证摘要](docs/validation-v2.3.1.txt)。此前网络逻辑验证见 [v2.3.0 验证摘要](docs/validation-v2.3.0.txt)。
 
 持久路由语义参考 [Microsoft New-NetRoute 文档](https://learn.microsoft.com/en-us/powershell/module/nettcpip/new-netroute#-policystore)。
 

@@ -1,0 +1,6 @@
+NetworkSwitch v2.3.1 tray icon patch
+Build: PASS
+UI regression: 15 checks passed (mock worker; no actual network changes)
+Embedded executable icon extraction: PASS
+Live tray visual verification: not performed
+Live network switching: not performed
