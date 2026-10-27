@@ -33,6 +33,7 @@ enum NetworkSwitchApp {
             return
         }
         let app = NSApplication.shared
+        app.appearance = NSAppearance(named: .darkAqua)
         if let existing = NSRunningApplication.runningApplications(withBundleIdentifier: "com.maxs.networkswitch")
             .first(where: { $0.processIdentifier != ProcessInfo.processInfo.processIdentifier }) {
             existing.activate(options: [.activateIgnoringOtherApps]); return
@@ -89,7 +90,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             logo.widthAnchor.constraint(equalToConstant: 64).isActive = true
             logo.heightAnchor.constraint(equalToConstant: 64).isActive = true
             hero.addArrangedSubview(logo)
-            tray.button?.image = image
+            tray.button?.image = image.copy() as? NSImage
             tray.button?.image?.size = NSSize(width: 18, height: 18)
             tray.button?.title = ""
         }
@@ -135,12 +136,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             status.stringValue = "未启用本工具的旁路由配置"
             activity.stringValue = "界面预览使用模拟数据；没有读取或修改系统网络。"
             updateDetails()
-            enableButton.isEnabled = false; restoreButton.isEnabled = false; refreshButton.isEnabled = false
+            enableButton.isEnabled = true; restoreButton.isEnabled = true; refreshButton.isEnabled = true
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                 let view = self.window.contentView!
                 view.layoutSubtreeIfNeeded(); view.displayIfNeeded()
-                guard let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { exit(2) }
-                view.cacheDisplay(in: view.bounds, to: bitmap)
+                let bitmap: NSBitmapImageRep
+                if let capture = CGWindowListCreateImage(.null, .optionIncludingWindow,
+                        CGWindowID(self.window.windowNumber), [.boundsIgnoreFraming, .bestResolution]) {
+                    bitmap = NSBitmapImageRep(cgImage: capture)
+                } else {
+                    guard let fallback = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { exit(2) }
+                    view.effectiveAppearance.performAsCurrentDrawingAppearance { view.cacheDisplay(in: view.bounds, to: fallback) }
+                    bitmap = fallback
+                }
                 guard let data = bitmap.representation(using: .png, properties: [:]) else { exit(2) }
                 do { try data.write(to: URL(fileURLWithPath: path)) }
                 catch { fputs(error.localizedDescription, stderr); exit(2) }
@@ -235,7 +243,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     @objc func enable() { guard let id = selectedID, !hasBackup else { return }; operate("enable", serviceID: id) }
     @objc func restore() { operate("restore", serviceID: nil) }
     private func operate(_ operation: String, serviceID: String?) {
-        guard !busy, !refreshing, let executable = Bundle.main.executableURL?.path else { return }
+        guard previewPath == nil, !busy, !refreshing, let executable = Bundle.main.executableURL?.path else { return }
         busy = true; generation += 1; updateButtons()
         activity.stringValue = "等待管理员授权；操作完成前请勿断开网络或退出程序。"
         var arguments = [executable, "--worker", operation]
