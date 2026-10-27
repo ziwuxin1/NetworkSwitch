@@ -16,7 +16,7 @@ using System.Windows.Forms;
 
 internal static class Program {
     internal static readonly string Root = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "MAXsGatewaySwitch");
-    internal static string Worker { get { return Path.Combine(Root, "NetworkWorker-1.0.ps1"); } }
+    internal static string Worker { get { return Path.Combine(Root, "NetworkWorker-2.3.0.ps1"); } }
     internal static bool Preview;
     internal static Dictionary<string, object> Map(object o) { return (Dictionary<string, object>)o; }
     internal static string Str(Dictionary<string, object> d, string key) { return d.ContainsKey(key) && d[key] != null ? Convert.ToString(d[key]) : ""; }
@@ -39,13 +39,11 @@ internal static class Program {
                 var start = new ProcessStartInfo(Application.ExecutablePath) { UseShellExecute=true, Verb="runas", WorkingDirectory=AppDomain.CurrentDomain.BaseDirectory };
                 Process.Start(start); return;
             }
-            if (args.Length == 3 && args[0] == "--watch") { Watch(Int32.Parse(args[1]), Int64.Parse(args[2])); return; }
             bool created;
             using (var mutex = new Mutex(true, "Global\\MAXsGatewaySwitch-v1", out created)) {
                 if (!created) { MessageBox.Show("网络切换工具已经在运行，请使用已打开的窗口。", "网络切换"); return; }
                 try {
                     PrepareWorker();
-                    var self = Process.GetCurrentProcess();
                     Application.Run(new MainForm());
                 } finally { mutex.ReleaseMutex(); }
             }
@@ -71,22 +69,8 @@ internal static class Program {
         using(var reader = new StreamReader(stream, Encoding.UTF8)) File.WriteAllText(Worker, reader.ReadToEnd(), new UTF8Encoding(true));
     }
 
-    static void Watch(int pid, long ticks) {
-        // No network changes while the UI lives. Recover only after an unexpected exit.
-        try {
-            using(var parent = Process.GetProcessById(pid)) {
-                if (parent.StartTime.ToUniversalTime().Ticks != ticks) return;
-                parent.WaitForExit();
-            }
-        } catch(ArgumentException) { }
-        for(int i=0;i<3;i++) {
-            try { if (Flag(Run("Restore", "",pid,ticks), "Ok")) return; } catch { }
-            Thread.Sleep(2000);
-        }
-    }
-
     internal static Dictionary<string, object> Run(string mode, string id, int owner=0, long ticks=0) {
-        if (!new[] { "Inspect", "Proxy", "Restore" }.Contains(mode)) throw new ArgumentException("Invalid mode");
+        if (!new[] { "Inspect", "Proxy", "Restore", "Repair" }.Contains(mode)) throw new ArgumentException("Invalid mode");
         if (id.Length > 0) id = Guid.Parse(id).ToString();
         string ps = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
         if(mode=="Proxy") { var self=Process.GetCurrentProcess();owner=self.Id;ticks=self.StartTime.ToUniversalTime().Ticks; }
@@ -138,28 +122,50 @@ internal class MainForm : Form {
     CutButton proxy,restore,refresh;
     FlowLayoutPanel log;
     Button minimize, maximize, close;
-    bool busy,hasBackup,isActive,loading;
+    bool busy,hasBackup,isActive,loading,exitRequested,restorePending,polling,legacyState,persistentReady;
+    int operationRevision;
+    string lastPollingError="";
+    readonly Func<string,string,Dictionary<string,object>> runOperation;
+    NotifyIcon tray;
+    System.Windows.Forms.Timer maintenance = new System.Windows.Forms.Timer { Interval=15000 };
     string message="正在读取网卡…", backupAdapter="";
     int logCount;
     Dictionary<string,object> current;
     System.Windows.Forms.ToolTip hints=new System.Windows.Forms.ToolTip();
     [System.Runtime.InteropServices.DllImport("user32.dll")] static extern bool ReleaseCapture();
     [System.Runtime.InteropServices.DllImport("user32.dll")] static extern IntPtr SendMessage(IntPtr h,int m,IntPtr w,IntPtr l);
-    public MainForm(){
+    public MainForm() : this(null) { }
+    internal MainForm(Func<string,string,Dictionary<string,object>> runner){
+        runOperation=runner??((mode,id)=>Program.Run(mode,id));
         Icon=Icon.ExtractAssociatedIcon(Application.ExecutablePath);ShowIcon=true;Text="旁路由切换";ClientSize=new Size(900,760);MinimumSize=new Size(900,720);
         FormBorderStyle=FormBorderStyle.None;StartPosition=FormStartPosition.CenterScreen;BackColor=Theme.Bg;ForeColor=Theme.Text;
         Font=Theme.Font(13);AutoScaleMode=AutoScaleMode.None;DoubleBuffered=true;
         adapters=new AdapterSelector();
         adapters.SelectedIndexChanged+=(s,e)=>{UpdateDetails();if(!loading&&current!=null)AddLog("已切换到网卡 "+Program.Str(current,"Name")+"；没有修改网络。","READ");};
         Controls.Add(adapters);
-        refresh=MakeButton("刷新  ↻",Theme.Cyan);refresh.Click+=async(s,e)=>await Execute("Inspect");
+        refresh=MakeButton("刷新  ↻",Theme.Cyan);refresh.Click+=async(s,e)=>await Execute(hasBackup&&!restorePending&&!legacyState?"Repair":"Inspect");
         proxy=MakeButton("01 //   切到旁路由",Theme.Yellow);proxy.Click+=async(s,e)=>await Execute("Proxy");
         restore=MakeButton("02 //   恢复自动",Theme.Cyan);restore.Click+=async(s,e)=>await Execute("Restore");
         log=new FlowLayoutPanel{AutoScroll=true,FlowDirection=FlowDirection.TopDown,WrapContents=false,BackColor=Theme.Deep,AccessibleName="操作记录",Padding=new Padding(0,4,0,0)};Controls.Add(log);        minimize=WindowButton("─");minimize.Click+=(s,e)=>WindowState=FormWindowState.Minimized;
         maximize=WindowButton("□");maximize.Click+=(s,e)=>WindowState=WindowState==FormWindowState.Maximized?FormWindowState.Normal:FormWindowState.Maximized;
         close=WindowButton("×");close.FlatAppearance.MouseOverBackColor=Theme.Pink;close.Click+=(s,e)=>Close();
         Shown+=async(s,e)=>{if(!Program.Preview)await Execute("Inspect");};
-        FormClosing+=(s,e)=>{if(busy){e.Cancel=true;AddLog("请等待当前操作完成。","WAIT");}};
+        FormClosing+=(s,e)=>{
+            if(e.CloseReason!=CloseReason.UserClosing)return;
+            if(busy){e.Cancel=true;AddLog("请等待当前操作完成。","WAIT");return;}
+            if(hasBackup&&!exitRequested&&!Program.Preview){e.Cancel=true;Hide();tray.Visible=true;tray.ShowBalloonTip(2500,"旁路由状态检查","程序继续只读检查。新版开启的旁路由在重启后也保留；还原请点击恢复自动。",ToolTipIcon.Info);}
+        };
+        maintenance.Tick+=async(s,e)=>await CheckStatus();
+        if(!Program.Preview){
+            var menu=new ContextMenuStrip();
+            menu.Items.Add("打开窗口",null,(s,e)=>{Show();WindowState=FormWindowState.Normal;Activate();});
+            menu.Items.Add("退出（保留当前配置）",null,(s,e)=>{if(busy)return;exitRequested=true;Close();});
+            menu.Items.Add("恢复并退出",null,async(s,e)=>{if(busy)return;await Execute("Restore");if(!hasBackup){exitRequested=true;Close();}else{Show();Activate();}});
+            tray=new NotifyIcon{Icon=SystemIcons.Application,Text="NetworkSwitch 2.3.0 · 重启保留",ContextMenuStrip=menu,Visible=true};
+            tray.DoubleClick+=(s,e)=>{Show();WindowState=FormWindowState.Normal;Activate();};
+            maintenance.Start();
+        }
+        FormClosed+=(s,e)=>{maintenance.Stop();maintenance.Dispose();if(tray!=null){tray.Visible=false;tray.Dispose();}};
         Resize+=(s,e)=>Arrange();
         MouseDown+=(s,e)=>{if(e.Button==MouseButtons.Left&&e.Y<110){ReleaseCapture();SendMessage(Handle,0xA1,(IntPtr)2,IntPtr.Zero);}};
         Arrange();
@@ -183,7 +189,7 @@ internal class MainForm : Form {
     protected override void OnPaint(PaintEventArgs e){
         base.OnPaint(e);var g=e.Graphics;int w=ClientSize.Width,h=ClientSize.Height;Color accent=isActive?Theme.Yellow:Theme.Cyan;
         Box(g,Theme.Bar,0,0,w,32);Logo(g,12,8,16);Txt(g,"旁路由切换",12,Theme.Muted,36,0,200,32);
-        Logo(g,28,56,56);Txt(g,"旁路由切换",28,Theme.Text,100,53,230,38,true);using(var titleFont=Theme.Font(28,true)){int vx=100+TextRenderer.MeasureText(g,"旁路由切换",titleFont,Size.Empty,TextFormatFlags.NoPadding).Width+12;Txt(g,"v2.1",11,Theme.Cyan,vx,70,65,20,false,true);}
+        Logo(g,28,56,56);Txt(g,"旁路由切换",28,Theme.Text,100,53,230,38,true);using(var titleFont=Theme.Font(28,true)){int vx=100+TextRenderer.MeasureText(g,"旁路由切换",titleFont,Size.Empty,TextFormatFlags.NoPadding).Width+12;Txt(g,"v2.3.0",11,Theme.Cyan,vx,70,65,20,false,true);}
         Txt(g,message,12,accent,100,94,w-290,24);
         var tag=new Rectangle(w-163,57,135,27);using(var b=new SolidBrush(accent))g.FillPolygon(b,Theme.Cut(tag,8));
         Txt(g,busy?"NET::BUSY":hasBackup?(isActive?"NET::PROXY":"NET::CHECK"):"NET::READY",12,Theme.Bg,w-153,57,125,27,true,true);
@@ -191,20 +197,20 @@ internal class MainForm : Form {
         for(int x=28;x<w-28;x+=20){using(var b=new SolidBrush(Theme.Yellow))g.FillPolygon(b,new[]{new Point(x,138),new Point(Math.Min(x+10,w-28),138),new Point(Math.Min(x+4,w-28),144),new Point(Math.Max(28,x-6),144)});}
         Txt(g,"网卡 / ADAPTER",11,Theme.Muted,28,155,350,24);Box(g,Theme.Cyan,28,220,w-200,2);
         string[] labels={"IPv4","当前默认网关","DNS","代理入口"}, codes={"ADDR","GW","DNS","PROXY"};
-        string[] vals=current==null?new[]{"--","--","--","--"}:new[]{Program.Str(current,"Address"),Program.Str(current,"Gateway"),Program.Str(current,"Dns"),isActive?"192.168.1.192":"--"};
-        string[] subs={current!=null&&Program.Flag(current,"Dhcp")?"自动获取（DHCP）":"手动 / 未知",isActive?"旁路由":"当前网关","当前解析服务器",isActive?"iStoreOS":"未启用"};
+        string[] vals=current==null?new[]{"--","--","--","--"}:new[]{Program.Str(current,"Address"),Program.Str(current,"Gateway"),Program.Str(current,"Dns"),hasBackup?"192.168.1.192":"--"};
+        string[] subs={current!=null&&Program.Flag(current,"Dhcp")?"自动获取（DHCP）":"手动 / 未知","DHCP 默认网关","当前解析服务器",hasBackup?(restorePending?"待完成还原":legacyState?"旧版临时配置":isActive?(persistentReady?"已生效 / 重启保留":"当前有效 / 未保存"):"请手动修复或还原"):"未启用"};
         int cw=(w-86)/4;
         for(int i=0;i<4;i++){int x=28+i*(cw+10);Box(g,Theme.Panel,x,238,cw,94);Box(g,i==0?Theme.Cyan:i==3&&!isActive?Theme.Line:Theme.Yellow,x,238,3,94);
             Txt(g,labels[i],13,Theme.Muted,x+13,246,cw-62,21);Txt(g,codes[i],11,Theme.Pink,x+cw-53,247,48,20,true,true);
             Txt(g,string.IsNullOrEmpty(vals[i])?"--":vals[i],23,i==0?Theme.Cyan:i==3?accent:Theme.Text,x+12,271,cw-20,29,true,true);
             Txt(g,subs[i],12,Theme.Muted,x+12,305,cw-20,20);
         }
-        Box(g,Theme.Cyan,28,346,w-56,26);Txt(g,"IP 保持 DHCP 自动获取；仅切换默认网关与 DNS，IPv6 保持原设置。",11,Theme.Bg,40,346,w-80,26);
-        Txt(g,"关闭窗口保持当前设置，点击「恢复自动」还原。",11,Theme.Muted,28,444,w-56,22);
-        Txt(g,"重启或 DHCP 续租后网关可能变化，需要时重新切换。",11,Theme.Muted,28,465,w-56,22);
+        Box(g,Theme.Cyan,28,346,w-56,26);Txt(g,"保留 DHCP 网关；使用专用 IPv4 路由与 DNS，IPv6 保持原设置。",11,Theme.Bg,40,346,w-80,26);
+        Txt(g,"后台每 15 秒只读检查，不自动切换或改写网络；关闭窗口进入托盘。",11,Theme.Muted,28,444,w-56,22);
+        Txt(g,"新版开启后，退出程序和重启电脑都保留旁路由；点击「恢复自动」才还原。",11,Theme.Muted,28,465,w-56,22);
         Box(g,Theme.Line,28,502,w-56,h-544);Box(g,Theme.Deep,29,503,w-58,h-546);Box(g,Theme.Yellow,29,503,w-58,27);
         Txt(g,"操作记录 · LOG",13,Theme.Bg,40,503,230,27,true);Txt(g,"SYS.LOG // "+logCount+" 条",10,Theme.Bg,w-210,503,170,27,true,true);
-        Box(g,Theme.Bar,0,h-28,w,28);Txt(g,">>  关闭窗口不会自动还原",11,Theme.Muted,14,h-28,w-310,28);
+        Box(g,Theme.Bar,0,h-28,w,28);Txt(g,">>  托盘可退出保留配置，或恢复并退出",11,Theme.Muted,14,h-28,w-310,28);
         Txt(g,"GW "+(current==null?"--":Program.Str(current,"Gateway")),11,Theme.Cyan,w-290,h-28,276,28,false,true);
         using(var p=new Pen(Theme.Line))g.DrawRectangle(p,0,0,w-1,h-1);
     }
@@ -214,34 +220,54 @@ internal class MainForm : Form {
         row.Controls.Add(new Label{Text=DateTime.Now.ToString("HH:mm:ss"),ForeColor=Theme.Pink,Font=Theme.Font(12,false,true),AutoSize=true,Margin=Padding.Empty},0,0);
         row.Controls.Add(new Label{Text=tag,ForeColor=tag=="ERR"||tag=="RST"?Theme.Pink:tag=="READ"?Theme.Cyan:Theme.Yellow,Font=Theme.Font(11,true,true),AutoSize=true,Margin=Padding.Empty},1,0);
         row.Controls.Add(new Label{Text=value,ForeColor=Theme.Text,Font=Theme.Font(12),AutoSize=true,MaximumSize=new Size(row.Width-126,0),Margin=Padding.Empty},2,0);
-        log.Controls.Add(row);log.ScrollControlIntoView(row);logCount++;Invalidate();
+        log.Controls.Add(row);if(log.Controls.Count>200){var oldRow=log.Controls[0];log.Controls.Remove(oldRow);oldRow.Dispose();}log.ScrollControlIntoView(row);logCount++;Invalidate();
     }    void UpdateDetails(){
         var a=adapters.SelectedItem as AdapterChoice;current=a==null?null:a.Data;
         proxy.Enabled=!busy&&!hasBackup&&current!=null&&Program.Str(current,"Target")=="192.168.1.192"&&Program.Flag(current,"Dhcp");
         restore.Enabled=!busy&&hasBackup;refresh.Enabled=!busy;adapters.Enabled=!busy&&!hasBackup;
+        refresh.Text=hasBackup&&!restorePending&&!legacyState?"手动修复":"刷新  ↻";
+        hints.SetToolTip(refresh,hasBackup&&!restorePending&&!legacyState?"手动检查并补回当前和重启保留的路由与 DNS；后台不会自动修复":"只读取状态；旧版配置请先恢复自动，再重新开启");
         proxy.Filled=isActive;restore.Filled=!hasBackup;proxy.Invalidate();restore.Invalidate();
         hints.SetToolTip(restore,hasBackup?"恢复网卡 "+backupAdapter+" 的原设置":"没有本工具保存的待还原设置");
         Invalidate();
     }
     void Display(Dictionary<string,object> data){
-        hasBackup=Program.Flag(data,"HasBackup");isActive=Program.Flag(data,"Active");backupAdapter=Program.Str(data,"BackupAdapter");
+        hasBackup=Program.Flag(data,"HasBackup");isActive=Program.Flag(data,"Active");restorePending=Program.Flag(data,"RestorePending");backupAdapter=Program.Str(data,"BackupAdapter");
+        legacyState=Program.Flag(data,"LegacyState");persistentReady=Program.Flag(data,"PersistentReady");
         string old=current==null?"":Program.Str(current,"Id");loading=true;adapters.Items.Clear();
         var list=data["Adapters"] as object[];if(list!=null)foreach(var item in list)adapters.Items.Add(new AdapterChoice{Data=Program.Map(item)});
         int pick=-1;for(int i=0;i<adapters.Items.Count;i++)if(Program.Str(((AdapterChoice)adapters.Items[i]).Data,"Id")==old)pick=i;
         if(pick<0)for(int i=0;i<adapters.Items.Count;i++)if(Program.Str(((AdapterChoice)adapters.Items[i]).Data,"Target")=="192.168.1.192"){pick=i;break;}
         if(pick<0&&adapters.Items.Count>0)pick=0;adapters.SelectedIndex=pick;loading=false;
-        message=hasBackup?(isActive?"网关已切到旁路由 · 未验证代理出口":"设置已变化 · 可恢复保存的原设置"):"已读取当前网络 · 未启用工具切换";
+        message=hasBackup?(restorePending?"还原未完成 · 请点击恢复自动重试":legacyState?"旧版临时配置 · 请先恢复自动，再重新开启":isActive?(persistentReady?"旁路由已生效 · 重启保留，直到手动恢复":"当前生效但未保存 · 请手动修复以保留到重启后"):"配置失效 · 请手动修复或恢复自动"):"已读取当前网络 · 未启用工具切换";
         UpdateDetails();
     }
-    async Task Execute(string mode){
-        if(busy)return;string id=current==null?"":Program.Str(current,"Id");
-        busy=true;message=mode=="Inspect"?"正在读取网卡…":"正在切换，请稍候…";UpdateDetails();
-        AddLog(mode=="Proxy"?"保存原设置，切换网关与 DNS…":mode=="Restore"?"正在恢复原网关与 DNS…":"读取网卡状态…",mode=="Proxy"?"SAVE":"READ");
+    internal async Task CheckStatus(){
+        if(busy||polling||!hasBackup)return;
+        polling=true;int revision=operationRevision;
         try{
-            var r=await Task.Run(()=>Program.Run(mode,id));bool ok=Program.Flag(r,"Ok");
-            AddLog(Program.Str(r,"Message"),!ok?"ERR":mode=="Proxy"?"LINK":mode=="Restore"?"RST":"READ");
+            var r=await Task.Run(()=>runOperation("Inspect",""));
+            // Ignore a snapshot started before a manual action, even if that
+            // action has already finished. Polling never issues network writes.
+            if(IsDisposed||Disposing||busy||revision!=operationRevision)return;
+            if(!Program.Flag(r,"Ok"))throw new Exception(Program.Str(r,"Message"));
+            Display(Program.Map(r["Data"]));lastPollingError="";
+        }catch(Exception ex){
+            if(!IsDisposed&&!Disposing&&!busy&&revision==operationRevision&&lastPollingError!=ex.Message){
+                lastPollingError=ex.Message;AddLog("状态读取失败，未修改网络："+ex.Message,"ERR");
+            }
+        }finally{polling=false;}
+    }
+    internal async Task Execute(string mode){
+        if(busy)return;string id=current==null?"":Program.Str(current,"Id");
+        operationRevision++;
+        busy=true;message=mode=="Inspect"?"正在读取网卡…":"正在切换，请稍候…";UpdateDetails();
+        AddLog(mode=="Proxy"?"保存原设置，添加旁路由路由与 DNS…":mode=="Restore"?"正在恢复原网关与 DNS…":mode=="Repair"?"正在按手动请求检查并修复配置…":"读取网卡状态…",mode=="Proxy"?"SAVE":"READ");
+        try{
+            var r=await Task.Run(()=>runOperation(mode,id));bool ok=Program.Flag(r,"Ok");
+            if(!string.IsNullOrEmpty(Program.Str(r,"Message")))AddLog(Program.Str(r,"Message"),!ok?"ERR":mode=="Proxy"?"LINK":mode=="Restore"?"RST":"READ");
             if(r.ContainsKey("Data")&&r["Data"]!=null)Display(Program.Map(r["Data"]));
-            else{var snap=await Task.Run(()=>Program.Run("Inspect",""));if(Program.Flag(snap,"Ok"))Display(Program.Map(snap["Data"]));}
+            else{var snap=await Task.Run(()=>runOperation("Inspect",""));if(Program.Flag(snap,"Ok"))Display(Program.Map(snap["Data"]));}
             if(!ok)message="操作未完成 · 请查看日志";
         }catch(Exception ex){AddLog(ex.Message,"ERR");message="操作未完成 · 请查看日志";}
         finally{busy=false;UpdateDetails();}
@@ -250,10 +276,10 @@ internal class MainForm : Form {
         Display(new Dictionary<string,object>{{"HasBackup",false},{"Active",false},{"Adapters",new object[]{new Dictionary<string,object>{{"Id","00000000-0000-0000-0000-000000000001"},{"Name","Ethernet"},{"Address","192.168.1.148"},{"Dhcp",true},{"Gateway","192.168.1.1"},{"Dns","192.168.1.1"},{"Target","192.168.1.192"},{"IPv6",true}}}}});
         AddLog("已恢复原网关与自动 DNS。","RST");
     }    internal void LoadPreview(){
-        Display(new Dictionary<string,object>{{"HasBackup",true},{"Active",true},{"BackupAdapter","Ethernet"},{"Adapters",new object[]{
-            new Dictionary<string,object>{{"Id","00000000-0000-0000-0000-000000000001"},{"Name","Ethernet"},{"Address","192.168.1.148"},{"Dhcp",true},{"Gateway","192.168.1.192"},{"Dns","192.168.1.192"},{"Target","192.168.1.192"},{"IPv6",true}},
+        Display(new Dictionary<string,object>{{"HasBackup",true},{"Active",true},{"PersistentReady",true},{"BackupAdapter","Ethernet"},{"Adapters",new object[]{
+            new Dictionary<string,object>{{"Id","00000000-0000-0000-0000-000000000001"},{"Name","Ethernet"},{"Address","192.168.1.148"},{"Dhcp",true},{"Gateway","192.168.1.1"},{"Dns","192.168.1.192"},{"Target","192.168.1.192"},{"IPv6",true}},
             new Dictionary<string,object>{{"Id","00000000-0000-0000-0000-000000000002"},{"Name","Ethernet 3"},{"Address","10.0.0.2"},{"Dhcp",false},{"Gateway",""},{"Dns",""},{"Target",""},{"IPv6",true}}}}});
-        AddLog("读取网卡状态…");AddLog("已读取当前网卡；没有修改网络。");AddLog("保存原网关与 DNS 设置。","SAVE");AddLog("网关已切到 192.168.1.192，IP 继续自动获取。","LINK");
+        AddLog("读取网卡状态…");AddLog("已读取当前网卡；没有修改网络。");AddLog("保存原网关与 DNS 设置。","SAVE");AddLog("旁路由路由已启用，保留 DHCP 默认网关。","LINK");
     }
 }
 internal class AdapterSelector : Control {

@@ -1,0 +1,26 @@
+Validation date: 2026-10-27
+Runtime: Windows PowerShell 5 and Windows .NET Framework C# compiler
+
+PASS: Reproduced v2.2.1 reboot failure before the fix:
+  Reboot keeps proxy routes paired with the saved DNS without running repair -> FAIL
+
+PASS: Updated worker simulation suite: 62 checks
+  Includes paired ActiveStore/PersistentStore simulation and restart reload,
+  restore followed by restart, partial saved-route creation rollback,
+  saved-route deletion failures, retry after restart, schema 1 compatibility,
+  schema 2 recovery marker, custom DNS recovery, unrelated persistent routes,
+  foreign half-route conflicts and route read errors.
+
+PASS: UI suite: 15 checks
+  24 accelerated timer callbacks dispatch only Inspect.
+  No periodic Repair, Proxy or Restore.
+  Old-state migration and incomplete persistence are displayed explicitly.
+  Manual restore remains available during polling and stale polls are discarded.
+
+PASS: Production EXE compiled.
+PASS: Preview rendered without changing network settings.
+PASS: Embedded PowerShell worker matches tested source exactly.
+PASS: Read-only Inspect on the actual Windows machine returned Ok=true, 2 adapters.
+
+NOT PERFORMED: Real network mutation, physical reboot or end-to-end proxy test.
+No host network, router, NAS or VPN configuration was changed during validation.

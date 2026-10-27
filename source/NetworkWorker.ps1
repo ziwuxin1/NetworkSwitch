@@ -1,5 +1,5 @@
 ﻿param(
-    [ValidateSet('Inspect','Proxy','Restore','Library')][string]$Mode = 'Inspect',
+    [ValidateSet('Inspect','Proxy','Restore','Repair','Library')][string]$Mode = 'Inspect',
     [string]$AdapterId = '',
     [string]$StateRoot = "$env:ProgramData\MAXsGatewaySwitch",
     [int]$OwnerProcessId = 0,
@@ -8,7 +8,7 @@
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)
-$script:Prefixes = @('0.0.0.0/0')
+$script:Prefixes = @('0.0.0.0/1','128.0.0.0/1')
 $script:StateFile = Join-Path $StateRoot 'restore.json'
 
 function Get-Plan($Addresses) {
@@ -51,7 +51,8 @@ function Set-IPv6Enabled($Adapter,[bool]$Enabled) {
 function Read-State {
     if (Test-Path -LiteralPath $script:StateFile) {
         $state = Get-Content -LiteralPath $script:StateFile -Raw -Encoding UTF8 | ConvertFrom-Json
-        if ($state.Schema -ne 1 -or $state.Gateway -notin @('192.168.1.192','192.168.30.1')) { throw '还原备份格式异常，未修改网络。' }
+        if ($state.Schema -notin @(1,2) -or $state.Gateway -notin @('192.168.1.192','192.168.30.1')) { throw '还原备份格式异常，未修改网络。' }
+        if ($state.Schema -eq 2 -and (@($state.RoutePrefixes) -join ',') -ne ($script:Prefixes -join ',')) { throw '持久路由备份格式异常，未修改网络。' }
         return $state
     }
     return $null
@@ -78,9 +79,47 @@ function Set-IPv4Dns($Adapter,$Dns) {
     else { $client | Set-DnsClientServerAddress -ServerAddresses @($Dns.Servers) }
 }
 
-function Get-OurRoutes($Adapter,$State) {
-    return @(Get-NetRoute -InterfaceIndex $Adapter.ifIndex -AddressFamily IPv4 -PolicyStore ActiveStore -ErrorAction SilentlyContinue |
-        Where-Object { $_.DestinationPrefix -in $script:Prefixes -and $_.NextHop -eq $State.Gateway -and [int]$_.RouteMetric -eq 7 -and [string]$_.Protocol -eq 'NetMgmt' })
+function Get-RouteTable([ValidateSet('ActiveStore','PersistentStore')][string]$Store='ActiveStore') {
+    try { return @(Get-NetRoute -AddressFamily IPv4 -PolicyStore $Store -ErrorAction Stop) }
+    catch {
+        # Windows reports an empty filtered store as an ObjectNotFound error.
+        # Only that result means empty; access/provider errors must still abort.
+        if ($_.FullyQualifiedErrorId -like 'CmdletizationQuery_NotFound*') { return @() }
+        throw
+    }
+}
+
+function Get-OurRoutes($Adapter,$State,[ValidateSet('ActiveStore','PersistentStore')][string]$Store='ActiveStore') {
+    $prefixes = if ($State.RoutePrefixes) { @($State.RoutePrefixes) } else { @('0.0.0.0/0') }
+    return @(Get-RouteTable $Store |
+        Where-Object { $_.InterfaceIndex -eq $Adapter.ifIndex -and $_.DestinationPrefix -in $prefixes -and $_.NextHop -eq $State.Gateway -and [int]$_.RouteMetric -eq 7 -and [string]$_.Protocol -eq 'NetMgmt' })
+}
+
+function Get-RouteStores($State) {
+    if ($State.Schema -eq 2) { return @('PersistentStore','ActiveStore') }
+    return @('ActiveStore')
+}
+
+function Remove-OwnedRoute($Adapter,$Route,[string]$Store) {
+    Remove-NetRoute -InterfaceIndex $Adapter.ifIndex -AddressFamily IPv4 -DestinationPrefix $Route.DestinationPrefix -NextHop $Route.NextHop -RouteMetric 7 -Protocol NetMgmt -PolicyStore $Store -Confirm:$false -ErrorAction Stop
+}
+
+function Ensure-ProxyRoutes($Adapter,$State) {
+    $active = @(Get-OurRoutes $Adapter $State)
+    $saved = if ($State.Schema -eq 2) { @(Get-OurRoutes $Adapter $State 'PersistentStore') } else { @() }
+    foreach ($prefix in $script:Prefixes) {
+        $liveRoute = @($active | Where-Object { $_.DestinationPrefix -eq $prefix })
+        $hasSaved = @($saved | Where-Object { $_.DestinationPrefix -eq $prefix }).Count -gt 0
+        if ($State.Schema -eq 2 -and -not $hasSaved) {
+            # New-NetRoute saves in BOTH stores when PolicyStore is omitted.
+            # Remove only our active-only copy before recreating the saved pair.
+            foreach ($route in $liveRoute) { Remove-OwnedRoute $Adapter $route 'ActiveStore' }
+            New-NetRoute -InterfaceIndex $Adapter.ifIndex -DestinationPrefix $prefix -NextHop $State.Gateway -RouteMetric 7 -Protocol NetMgmt | Out-Null
+        } elseif ($liveRoute.Count -eq 0) {
+            # A saved route already exists (or this is a legacy temporary state).
+            New-NetRoute -InterfaceIndex $Adapter.ifIndex -DestinationPrefix $prefix -NextHop $State.Gateway -RouteMetric 7 -Protocol NetMgmt -PolicyStore ActiveStore | Out-Null
+        }
+    }
 }
 
 function Test-Gateway([string]$Gateway) {
@@ -101,7 +140,7 @@ function Assert-OwnerAlive {
     }
 }
 
-function Assert-CanSwitch($Adapter) {
+function Assert-CanSwitch($Adapter,$ExistingState=$null,[switch]$SkipConnectivity) {
     # Some Mellanox drivers report HardwareInterface=false even though Windows
     # includes the adapter in -Physical. Use the OS physical-adapter inventory.
     $physicalIds = @(Get-NetAdapter -Physical | ForEach-Object { ([string]$_.InterfaceGuid).Trim('{}') })
@@ -112,8 +151,11 @@ function Assert-CanSwitch($Adapter) {
     $ipif = Get-NetIPInterface -InterfaceIndex $Adapter.ifIndex -AddressFamily IPv4
     if ([string]$ipif.Dhcp -ne 'Enabled') { throw '此网卡当前使用手动 IPv4。本工具不猜测空闲 IP；请先在 Windows 将 IP 分配改为自动(DHCP)，再切换。原设置未修改。' }
     if ($plan.Gateway -eq '192.168.30.1') { throw '已经连接 Proxy-WiFi：网关本来就是 192.168.30.1，无需切换。若要一键切换直连/代理，请连接普通家庭网络后使用本工具。' }
-    $routes = @(Get-NetRoute -AddressFamily IPv4 -PolicyStore ActiveStore)
-    if (@($routes | Where-Object { $_.DestinationPrefix -in @('0.0.0.0/1','128.0.0.0/1') }).Count -gt 0) { throw '检测到现有 VPN/半默认路由。请先退出 Clash Verge、Clash Mi 或其他 VPN，再切换。' }
+    $routes = @(Get-RouteTable 'ActiveStore')
+    $savedRoutes = @(Get-RouteTable 'PersistentStore')
+    foreach ($table in @(@{Routes=$routes; Owned=($null -ne $ExistingState)},@{Routes=$savedRoutes; Owned=($ExistingState -and $ExistingState.Schema -eq 2)})) {
+        if (@($table.Routes | Where-Object { $_.DestinationPrefix -in $script:Prefixes -and -not ($table.Owned -and $_.InterfaceIndex -eq $Adapter.ifIndex -and $_.NextHop -eq $ExistingState.Gateway -and [int]$_.RouteMetric -eq 7 -and [string]$_.Protocol -eq 'NetMgmt') }).Count -gt 0) { throw '检测到现有 VPN/半默认路由（含重启保留的路由）。请先退出电脑上的 VPN 并处理原路由，再切换。' }
+    }
     $up = @(Get-NetAdapter -IncludeHidden | Where-Object { [string]$_.Status -eq 'Up' })
     $upIndices = @($up | ForEach-Object { [int]$_.ifIndex })
     $otherDefault = @($routes | Where-Object { $_.DestinationPrefix -eq '0.0.0.0/0' -and $_.InterfaceIndex -ne $Adapter.ifIndex -and $_.InterfaceIndex -in $upIndices })
@@ -123,9 +165,11 @@ function Assert-CanSwitch($Adapter) {
     if ($virtual.Count -gt 0) { throw '检测到活动的 VPN/TUN 网卡，请先退出电脑上的代理或 VPN。' }
     $proxy = Get-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings' -ErrorAction SilentlyContinue
     if ($proxy -and ($proxy.ProxyEnable -eq 1 -or -not [string]::IsNullOrWhiteSpace([string]$proxy.AutoConfigURL))) { throw 'Windows 系统代理或 PAC 仍在启用，请先关闭电脑上的代理软件/系统代理。工具不会覆盖原有代理设置。' }
-    if (-not (Test-Gateway $plan.Gateway)) { throw '无法连接 iStoreOS 的 192.168.1.192:80。请确认在家庭主网络且 iStoreOS 已开机。未修改网络。' }
-    try { Resolve-DnsName example.com -Server $plan.Gateway -Type A -DnsOnly -QuickTimeout -ErrorAction Stop | Out-Null }
-    catch { throw 'iStoreOS DNS 没有响应，未切换。请检查 OpenClash/DNS 服务。' }
+    if (-not $SkipConnectivity) {
+        if (-not (Test-Gateway $plan.Gateway)) { throw '无法连接 iStoreOS 的 192.168.1.192:80。请确认在家庭主网络且 iStoreOS 已开机。未修改网络。' }
+        try { Resolve-DnsName example.com -Server $plan.Gateway -Type A -DnsOnly -QuickTimeout -ErrorAction Stop | Out-Null }
+        catch { throw 'iStoreOS DNS 没有响应，未切换。请检查 OpenClash/DNS 服务。' }
+    }
     return $plan
 }
 
@@ -135,24 +179,35 @@ function Restore-Network {
     if ($OwnerProcessId -ne 0 -and ($state.OwnerProcessId -ne $OwnerProcessId -or $state.OwnerStartTicks -ne $OwnerStartTicks)) {
         return '备份属于另一次运行，守护进程不修改它。'
     }
+    # Persist restore intent BEFORE any network mutation. A retained recovery
+    # backup must not be mistaken for permission to re-enable proxy routes.
+    $state | Add-Member -NotePropertyName RestorePending -NotePropertyValue $true -Force
+    Write-State $state
     $adapter = Get-AdapterById $state.AdapterId
     # Restore the previous DHCP-provided gateways before removing our override.
-    foreach ($r in @($state.DefaultRoutes)) {
-        $exists = @(Get-NetRoute -InterfaceIndex $adapter.ifIndex -DestinationPrefix '0.0.0.0/0' -AddressFamily IPv4 | Where-Object { $_.NextHop -eq $r.NextHop -and $_.RouteMetric -eq $r.RouteMetric })
+    $sameNetwork = $false
+    try { $sameNetwork = (Get-Plan (Get-Addresses $adapter)).Gateway -eq $state.Gateway } catch { }
+    # Only legacy versions removed DHCP defaults. Never replay them on another LAN.
+    foreach ($r in @($state.DefaultRoutes | Where-Object { -not $state.RoutePrefixes -and $sameNetwork })) {
+        $exists = @(Get-RouteTable 'ActiveStore' | Where-Object { $_.InterfaceIndex -eq $adapter.ifIndex -and $_.DestinationPrefix -eq '0.0.0.0/0' -and $_.NextHop -eq $r.NextHop -and $_.RouteMetric -eq $r.RouteMetric })
         if ($exists.Count -eq 0) {
             New-NetRoute -InterfaceIndex $adapter.ifIndex -DestinationPrefix '0.0.0.0/0' -NextHop $r.NextHop -RouteMetric $r.RouteMetric -PolicyStore ActiveStore | Out-Null
         }
     }
     $errors = New-Object 'System.Collections.Generic.List[string]'
-    try {
-        foreach ($route in @(Get-OurRoutes $adapter $state)) { $route | Remove-NetRoute -Confirm:$false }
-    } catch { $errors.Add('路由：' + $_.Exception.Message) }
+    foreach ($store in @(Get-RouteStores $state)) {
+        try {
+            foreach ($route in @(Get-OurRoutes $adapter $state $store)) { Remove-OwnedRoute $adapter $route $store }
+        } catch { $errors.Add($store + ' 路由：' + $_.Exception.Message) }
+    }
     try { Set-IPv4Dns $adapter $state.Dns } catch { $errors.Add('DNS：' + $_.Exception.Message) }
     try { if ((Get-IPv6Enabled $adapter) -ne [bool]$state.IPv6Enabled) { Set-IPv6Enabled $adapter ([bool]$state.IPv6Enabled) } }
     catch { $errors.Add('IPv6：' + $_.Exception.Message) }
     try { Clear-DnsClientCache } catch { }
     if ($errors.Count -gt 0) { throw ('部分还原未完成，备份已保留，可再次点击还原。' + ($errors -join '；')) }
-    if (@(Get-OurRoutes $adapter $state).Count -ne 0) { throw '临时路由仍然存在，备份已保留，请再次还原。' }
+    foreach ($store in @(Get-RouteStores $state)) {
+        if (@(Get-OurRoutes $adapter $state $store).Count -ne 0) { throw "$store 中的代理路由仍存在，备份已保留，请再次还原。" }
+    }
     $dnsNow = Get-DnsSnapshot $adapter
     if ([bool]$dnsNow.Automatic -ne [bool]$state.Dns.Automatic -or
         ((@($dnsNow.Servers) -join ',') -ne (@($state.Dns.Servers) -join ','))) { throw 'DNS 还原校验未通过，备份已保留。' }
@@ -168,7 +223,7 @@ function Enable-Proxy([string]$Id) {
     $adapter = Get-AdapterById $Id
     $plan = Assert-CanSwitch $adapter
     $state = [pscustomobject]@{
-        Schema=1; AdapterId=([string]$adapter.InterfaceGuid).Trim('{}'); AdapterName=[string]$adapter.Name
+        Schema=2; RoutePrefixes=$script:Prefixes; AdapterId=([string]$adapter.InterfaceGuid).Trim('{}'); AdapterName=[string]$adapter.Name
         Gateway=$plan.Gateway; Address=$plan.Address; Started=(Get-Date).ToString('o')
         OwnerProcessId=$OwnerProcessId; OwnerStartTicks=$OwnerStartTicks
         Dns=(Get-DnsSnapshot $adapter); IPv6Enabled=(Get-IPv6Enabled $adapter)
@@ -179,6 +234,7 @@ function Enable-Proxy([string]$Id) {
     try {
         # The original DHCP address/default route are never removed. More specific
         # routes override only public IPv4 routing; connected LAN routes still win.
+        # Schema 2 saves routes in both stores, matching the persistent DNS setting.
         # IPv6 is left unchanged.
         # Binding changes may briefly cycle the interface. Wait for the DHCP lease.
         $ready = $false
@@ -189,18 +245,17 @@ function Enable-Proxy([string]$Id) {
         }
         if (-not $ready) { throw '切换期间网卡没有重新获得地址。' }
         Set-IPv4Dns $adapter ([pscustomobject]@{Automatic=$false; Servers=@($plan.Gateway)})
-        Get-NetRoute -InterfaceIndex $adapter.ifIndex -DestinationPrefix '0.0.0.0/0' -AddressFamily IPv4 | Remove-NetRoute -Confirm:$false
-        foreach ($prefix in $script:Prefixes) {
-            New-NetRoute -InterfaceIndex $adapter.ifIndex -DestinationPrefix $prefix -NextHop $plan.Gateway -RouteMetric 7 -Protocol NetMgmt -PolicyStore ActiveStore | Out-Null
-        }
+        Ensure-ProxyRoutes $adapter $state
         Clear-DnsClientCache
-        if (@(Get-OurRoutes $adapter $state).Count -ne 1) { throw '代理路由校验失败。' }
+        foreach ($store in @(Get-RouteStores $state)) {
+            if (@(Get-OurRoutes $adapter $state $store).Count -ne 2) { throw "$store 代理路由校验失败。" }
+        }
         $dns = @(Get-DnsClientServerAddress -InterfaceIndex $adapter.ifIndex -AddressFamily IPv4 | ForEach-Object { $_.ServerAddresses })
         if ($dns.Count -ne 1 -or $dns[0] -ne $plan.Gateway) { throw 'DNS 设置校验失败。' }
         if (-not (Test-Gateway $plan.Gateway)) { throw '切换后 iStoreOS 不可达。' }
         try { Resolve-DnsName example.com -Server $plan.Gateway -Type A -DnsOnly -QuickTimeout -ErrorAction Stop | Out-Null }
         catch { throw '切换后的 DNS 检查失败。' }
-        return '代理已开启：经 192.168.1.192 分流，IPv4 继续自动获取。请保持此窗口运行；关闭窗口会自动还原。'
+        return '代理已开启并保存：重启电脑或退出程序后仍经 192.168.1.192 分流，直到点击「恢复自动」。IPv4 继续自动获取。'
     } catch {
         $cause = $_.Exception.Message
         try { $null = Restore-Network; throw "切换失败，已自动还原。原因：$cause" }
@@ -208,6 +263,42 @@ function Enable-Proxy([string]$Id) {
             if (Test-Path -LiteralPath $script:StateFile) { throw "切换失败：$cause。自动还原未完成，请点击一键还原。$($_.Exception.Message)" }
             throw
         }
+    }
+}
+
+function Repair-Network {
+    $state = Read-State
+    if (-not $state) { return '' }
+    if ($state.RestorePending) { return '上次还原尚未完成，已禁止重新添加代理路由。请点击「恢复自动」重试。' }
+    if ($state.Schema -ne 2) { return '旧版临时配置：请先「恢复自动」，再「切到旁路由」以保存重启后的设置。' }
+    $adapter = Get-AdapterById $state.AdapterId
+    if ([string]$adapter.Status -ne 'Up') { return '' }
+    $addresses = @(Get-Addresses $adapter)
+    if (@($addresses | Where-Object { [string]$_.AddressState -eq 'Preferred' -and $_.IPAddress -notlike '169.254.*' }).Count -eq 0) { return '' }
+    # Repair is an explicit user action. Check local topology, not the health of
+    # the router's web panel/DNS: temporary service failures must not switch modes.
+    try { $null = Assert-CanSwitch $adapter $state -SkipConnectivity }
+    catch {
+        $cause = $_.Exception.Message
+        $null = Restore-Network
+        return "网络环境发生冲突，已恢复原设置：$cause"
+    }
+    $routes = @(Get-OurRoutes $adapter $state)
+    $savedRoutes = @(Get-OurRoutes $adapter $state 'PersistentStore')
+    $dns = Get-DnsSnapshot $adapter
+    $dnsOk = -not $dns.Automatic -and (@($dns.Servers) -join ',') -eq $state.Gateway
+    if ($routes.Count -eq 2 -and $savedRoutes.Count -eq 2 -and $dnsOk) { return '' }
+    try {
+        Ensure-ProxyRoutes $adapter $state
+        if (-not $dnsOk) { Set-IPv4Dns $adapter ([pscustomobject]@{Automatic=$false; Servers=@($state.Gateway)}) }
+        $verified = Inspect-Network
+        if (-not $verified.Active -or -not $verified.PersistentReady) { throw '修复后的当前/重启路由或 DNS 校验失败。' }
+        Clear-DnsClientCache
+        return '已按手动请求修复旁路由路由与 DNS。'
+    } catch {
+        $cause = $_.Exception.Message
+        $null = Restore-Network
+        throw "手动修复失败，已恢复原设置：$cause"
     }
 }
 
@@ -230,24 +321,26 @@ function Inspect-Network {
         }
     }
     $active=$false
+    $persistentReady=$false
     if ($state) {
         try {
             $a = Get-AdapterById $state.AdapterId
             $p = Get-Plan (Get-Addresses $a)
             $dns = @(Get-DnsClientServerAddress -InterfaceIndex $a.ifIndex -AddressFamily IPv4 | ForEach-Object { $_.ServerAddresses })
             $active = ([string]$a.Status -eq 'Up' -and $p.Gateway -eq $state.Gateway -and
-                @(Get-OurRoutes $a $state).Count -eq 1 -and
+                @(Get-OurRoutes $a $state).Count -eq $(if($state.RoutePrefixes){2}else{1}) -and
                 $dns.Count -eq 1 -and $dns[0] -eq $state.Gateway)
+            $persistentReady = ($state.Schema -eq 2 -and @(Get-OurRoutes $a $state 'PersistentStore').Count -eq 2)
         } catch { $active=$false }
     }
-    return [pscustomobject]@{ Adapters=@($items); HasBackup=($null -ne $state); Active=$active; BackupAdapter=$(if($state){$state.AdapterName}else{''}) }
+    return [pscustomobject]@{ Adapters=@($items); HasBackup=($null -ne $state); Active=$active; PersistentReady=$persistentReady; LegacyState=($null -ne $state -and $state.Schema -eq 1); RestorePending=($null -ne $state -and [bool]$state.RestorePending); BackupAdapter=$(if($state){$state.AdapterName}else{''}) }
 }
 
 if ($Mode -eq 'Library') { return }
 $operationMutex = $null
 $operationLock = $false
 try {
-    if ($Mode -in @('Proxy','Restore')) {
+    if ($Mode -in @('Proxy','Restore','Repair')) {
         $operationMutex = New-Object System.Threading.Mutex($false,'Global\MAXsGatewaySwitch-operation-v1')
         try { $operationLock = $operationMutex.WaitOne(65000) }
         catch [System.Threading.AbandonedMutexException] { $operationLock=$true }
@@ -256,6 +349,7 @@ try {
     $message = switch ($Mode) {
         'Proxy' { Enable-Proxy $AdapterId }
         'Restore' { Restore-Network }
+        'Repair' { Repair-Network }
         default { '已读取当前网卡；没有修改网络。' }
     }
     [pscustomobject]@{Ok=$true; Message=$message; Data=(Inspect-Network)} | ConvertTo-Json -Depth 8 -Compress
