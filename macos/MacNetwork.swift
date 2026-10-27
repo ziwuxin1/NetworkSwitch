@@ -157,7 +157,7 @@ final class MacNetwork: NetworkBackend {
               bsd.range(of: "^en[0-9]+$", options: .regularExpression) != nil,
               let type = SCNetworkInterfaceGetInterfaceType(interface),
               [kSCNetworkInterfaceTypeEthernet, kSCNetworkInterfaceTypeIEEE80211].contains(type) else { return nil }
-        let id = SCNetworkServiceGetServiceID(service) as String
+        guard let id = SCNetworkServiceGetServiceID(service) as String? else { return nil }
         let live = state("State:/Network/Service/\(id)/IPv4")
         let configuredDNS = (try? config(id, kSCNetworkProtocolTypeDNS))?["ServerAddresses"] as? [String]
         let dns = configuredDNS ?? (state("State:/Network/Service/\(id)/DNS")["ServerAddresses"] as? [String] ?? [])
@@ -203,7 +203,7 @@ final class MacNetwork: NetworkBackend {
         let primary = state("State:/Network/Global/IPv4")["PrimaryService"] as? String
         try require(primary == serviceID, "请选择当前主上网网卡，并断开其他上网网卡或 VPN。")
         for s in currentServices() where SCNetworkServiceGetEnabled(s) {
-            let id = SCNetworkServiceGetServiceID(s) as String
+            guard let id = SCNetworkServiceGetServiceID(s) as String? else { continue }
             if let ip = try? config(id, kSCNetworkProtocolTypeIPv4),
                let routes = ip["AdditionalRoutes"] as? [[String: String]] {
                 try require(!Settings(routes: routes, dns: nil).hasHalfDefault, "检测到已有持久半默认路由，请先关闭 VPN 或处理原路由。")
