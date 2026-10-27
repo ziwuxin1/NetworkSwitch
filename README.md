@@ -13,7 +13,7 @@
   <a href="https://github.com/ziwuxin1/NetworkSwitch/releases/tag/v2.3.1"><img src="badge-version.svg" alt="Version v2.3.1"></a>
   <img src="badge-platform.svg" alt="Platform Windows">
   <img src="badge-ui.svg" alt="UI WinForms">
-  <img src="badge-private.svg" alt="Private repository">
+  <img src="badge-public.svg" alt="Public repository">
 </p>
 
 <p align="center">
@@ -67,7 +67,7 @@
 | [SHA256SUMS.txt](https://github.com/ziwuxin1/NetworkSwitch/releases/download/v2.3.1/SHA256SUMS.txt) | EXE 和 ZIP 的 SHA-256 校验值。 |
 | [source/](source/) | 在线查看源码、构建脚本、图标和模拟测试。 |
 
-此仓库为私有仓库，下载需要登录具有访问权限的 GitHub 账号。正式版本及校验文件见 [Releases](https://github.com/ziwuxin1/NetworkSwitch/releases/latest)。
+此仓库已公开，可直接查看源码和下载程序，无需仓库访问权限。正式版本及校验文件见 [Releases](https://github.com/ziwuxin1/NetworkSwitch/releases/latest)。
 
 ## 快速开始
 

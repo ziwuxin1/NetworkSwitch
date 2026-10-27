@@ -31,4 +31,4 @@ macOS 构建机已编译 arm64 和 x86_64，并完成 33 项模拟事务检查�
 
 本版使用 ad-hoc 签名，**尚未经过 Apple Developer ID 签名和公证**。若 Gatekeeper 阻止打开，确认下载来源后，在“系统设置 → 隐私与安全性”选择“仍要打开”。无需关闭系统安全保护。若 macOS 询问本地网络访问，请允许。
 
-详细说明见附件 `README-macOS.md`。此仓库为私有仓库，下载需要有访问权限的 GitHub 账号。
+详细说明见附件 `README-macOS.md`。此仓库已公开，可直接下载，无需登录 GitHub。
