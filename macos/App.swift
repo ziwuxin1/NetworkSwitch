@@ -38,6 +38,7 @@ enum NetworkSwitchApp {
             existing.activate(options: [.activateIgnoringOtherApps]); return
         }
         let delegate = AppDelegate()
+        if args.count == 3 && args[1] == "--render-preview" { delegate.previewPath = args[2] }
         app.setActivationPolicy(.regular)
         app.delegate = delegate
         withExtendedLifetime(delegate) { app.run() }
@@ -45,6 +46,7 @@ enum NetworkSwitchApp {
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
+    var previewPath: String?
     private var window: NSWindow!
     private var tray: NSStatusItem!
     private var timer: Timer?
@@ -67,7 +69,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         makeMenu()
-        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 640, height: 560),
+        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 640, height: 650),
                           styleMask: [.titled, .closable, .miniaturizable], backing: .buffered, defer: false)
         window.title = "NetworkSwitch · macOS \(appVersion)"
         window.isReleasedWhenClosed = false
@@ -125,6 +127,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             note.widthAnchor.constraint(equalTo: stack.widthAnchor)
         ])
         window.center(); showWindow()
+        if let path = previewPath {
+            services = [ServiceInfo(id: "11111111-1111-1111-1111-111111111111", name: "Wi-Fi", device: "en0",
+                addresses: ["192.168.1.25"], masks: ["255.255.255.0"], dhcp: true, router: "192.168.1.1", dns: ["192.168.1.1"])]
+            picker.addItem(withTitle: "Wi-Fi  ·  192.168.1.25")
+            picker.lastItem?.representedObject = services[0].id
+            status.stringValue = "未启用本工具的旁路由配置"
+            activity.stringValue = "界面预览使用模拟数据；没有读取或修改系统网络。"
+            updateDetails()
+            enableButton.isEnabled = false; restoreButton.isEnabled = false; refreshButton.isEnabled = false
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                let view = self.window.contentView!
+                view.layoutSubtreeIfNeeded(); view.displayIfNeeded()
+                guard let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { exit(2) }
+                view.cacheDisplay(in: view.bounds, to: bitmap)
+                guard let data = bitmap.representation(using: .png, properties: [:]) else { exit(2) }
+                do { try data.write(to: URL(fileURLWithPath: path)) }
+                catch { fputs(error.localizedDescription, stderr); exit(2) }
+                NSApplication.shared.terminate(nil)
+            }
+            return
+        }
         timer = Timer.scheduledTimer(withTimeInterval: 15, repeats: true) { [weak self] _ in self?.refresh() }
         refresh()
     }

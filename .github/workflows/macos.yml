@@ -28,5 +28,6 @@ jobs:
             macos/build/SHA256SUMS-macOS.txt
             macos/build/TEST-RESULTS.txt
             macos/build/README-macOS.md
+            macos/build/preview-macOS.png
           if-no-files-found: error
           retention-days: 14
