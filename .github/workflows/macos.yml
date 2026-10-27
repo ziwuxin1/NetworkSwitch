@@ -1,0 +1,32 @@
+name: Build macOS
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'macos/**'
+      - '.github/workflows/macos.yml'
+      - 'source/NetworkSwitch-logo.png'
+  pull_request:
+    paths:
+      - 'macos/**'
+      - '.github/workflows/macos.yml'
+permissions:
+  contents: read
+jobs:
+  universal-app:
+    runs-on: macos-15
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build, test, and package universal app
+        run: bash macos/build.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NetworkSwitch-macOS-universal
+          path: |
+            macos/build/NetworkSwitch-macOS-*-universal.zip
+            macos/build/SHA256SUMS-macOS.txt
+            macos/build/TEST-RESULTS.txt
+            macos/build/README-macOS.md
+          if-no-files-found: error
+          retention-days: 14

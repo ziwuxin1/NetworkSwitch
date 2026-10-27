@@ -8,3 +8,7 @@
 *.zip binary
 *.png binary
 *.ico binary
+*.swift text eol=lf
+*.sh text eol=lf
+*.yml text eol=lf
+*.plist text eol=lf

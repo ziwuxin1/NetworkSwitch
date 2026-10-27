@@ -56,6 +56,8 @@
 
 ## 下载
 
+**macOS 测试版：**新增原生窗口和菜单栏版本，支持 Apple 芯片与 Intel，最低 macOS 13。见 [macOS 使用说明与构建方法](macos/README.md)。Windows 下载如下。
+
 **[下载 NetworkSwitch v2.3.1 完整包](https://github.com/ziwuxin1/NetworkSwitch/releases/download/v2.3.1/NetworkSwitch-v2.3.1.zip)**
 
 | 文件 | 用途 |
