@@ -1,0 +1,43 @@
+PASS: Existing routes are preserved alongside both half-default routes
+PASS: Bypass DNS is saved
+PASS: Backup retains static DNS and unknown route keys
+PASS: A second enable never replaces recovery data
+PASS: Duplicate enable performs no additional writes
+PASS: Reopened app restores original configuration exactly
+PASS: Restore with no backup is a no-op
+PASS: Automatic DNS and absent additional-route keys survive round trip
+PASS: Partial mutation triggers rollback
+PASS: Partial DNS-only mutation rolls back safely
+PASS: Runtime route verification failure triggers rollback
+PASS: Saved settings alone do not count as success
+PASS: Failed rollback retains recovery
+PASS: Restore intent survives a failed verification
+PASS: Recovery-pending state blocks another enable
+PASS: Restoration can be retried after settings were already restored
+PASS: Concurrent DNS modification stops automatic restoration
+PASS: External DNS is not overwritten and backup remains
+PASS: Recovery succeeds after resolving conflict
+PASS: Disk failure stops enable before mutation
+PASS: No network mutation without durable backup
+PASS: VPN/preflight failure stops enable
+PASS: Preflight rejection changes neither network nor backup
+PASS: Preexisting half-default routes are never taken over
+PASS: Recovery encoding is lossless
+PASS: Unknown recovery schemas fail closed
+PASS: Shell quoting keeps metacharacters literal
+PASS: AppleScript quoting escapes nested shell command
+PASS: Darwin netstat half-default formats are parsed
+PASS: Route interface uses header position, not the expiring column
+PASS: IPv6 utun defaults and split routes do not block a normal IPv4 home connection
+PASS: Actual IPv4 tunnel split routes remain blocked with benign IPv6 tunnels present
+PASS: Actual IPv4 tunnel default remains blocked
+PASS: Another physical IPv4 default is still identified as a conflicting connection
+PASS: Conflict reports observed route details without claiming installed VPN software
+PASS: A tunnel name or narrow local route alone is not an IPv4 default-route conflict
+PASS: Home DHCP interface is eligible
+PASS: Manual IPv4 configuration is rejected
+PASS: The bypass router address cannot be used as a client
+TOTAL: 39 checks passed; no system network writes
+
+Build: arm64 + x86_64; bundle signature verified; read-only macOS inspection passed.
+Real network switching, sleep/wake and reboot: NOT tested.

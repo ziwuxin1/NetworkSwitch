@@ -56,7 +56,7 @@
 
 ## 下载
 
-**[下载 macOS 1.0.0 beta 1 通用版](https://github.com/ziwuxin1/NetworkSwitch/releases/tag/macos-v1.0.0-beta.1)**：原生窗口和菜单栏版本，支持 Apple 芯片与 Intel，最低 macOS 13。见 [macOS 使用说明与构建方法](macos/README.md)。Windows 下载如下。
+**[下载 macOS 1.0.0 beta 2 通用版](https://github.com/ziwuxin1/NetworkSwitch/releases/tag/macos-v1.0.0-beta.2)**：修复 IPv6 隧道路由引起的 VPN 误报。原生窗口和菜单栏版本，支持 Apple 芯片与 Intel，最低 macOS 13。见 [macOS 使用说明与构建方法](macos/README.md)。Windows 下载如下。
 
 **[下载 NetworkSwitch v2.3.1 完整包](https://github.com/ziwuxin1/NetworkSwitch/releases/download/v2.3.1/NetworkSwitch-v2.3.1.zip)**
 
