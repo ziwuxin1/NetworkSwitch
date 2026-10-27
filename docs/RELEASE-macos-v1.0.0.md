@@ -17,7 +17,9 @@ macOS 首个正式版，支持 **macOS 13+、Apple 芯片和 Intel**。沿用已
 
 ## 验证与签名
 
-正式版使用 macOS 构建机编译通用应用，并执行模拟事务与路由冲突回归检查、应用签名校验、系统只读查询和界面预览。实际结果见附件 `TEST-RESULTS.txt`。
+正式版已在 macOS 构建机编译 Apple 芯片和 Intel 通用应用，39 项模拟事务与路由冲突检查通过；应用签名校验、系统只读查询、ZIP 完整性、版本号和下载校验通过，界面预览已检查。实际结果见附件 `TEST-RESULTS.txt`。
+
+构建来源：`3ce9c0a84aeda1945b79f68e8353a911923a92bb`；[构建与测试记录](https://github.com/ziwuxin1/NetworkSwitch/actions/runs/40591450267)。
 
 用户已反馈 beta 2 修复版可用；睡眠唤醒、重启和各项恢复场景尚无完整实机验证记录。CI 不执行家庭网络修改。
 
