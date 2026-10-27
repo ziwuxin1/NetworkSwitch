@@ -1,6 +1,6 @@
 import Foundation
 
-let appVersion = "1.0.0-beta.1"
+let appVersion = "1.0.0-beta.2"
 let bypassGateway = "192.168.1.192"
 
 struct SwitchError: LocalizedError {
@@ -133,6 +133,23 @@ struct RouteRow {
     let gateway: String
     let device: String
     var halfDefault: Bool { ["0/1", "0.0.0.0/1", "128.0/1", "128/1", "128.0.0.0/1"].contains(destination) }
+}
+
+struct NetworkRoutes {
+    let ipv4: [RouteRow]
+    let ipv6: [RouteRow]
+
+    func validateIPv4Switch(selectedDevice: String) throws {
+        // This app modifies IPv4 only. An IPv6 default on a utun interface
+        // cannot establish that a user VPN owns the IPv4 path. Keep IPv6
+        // intact, including system-created scoped tunnel routes.
+        if let route = ipv4.first(where: { $0.halfDefault }) {
+            throw SwitchError("检测到已有 IPv4 半默认路由：\(route.destination) → \(route.gateway)（\(route.device)）。请先处理这条冲突路由。")
+        }
+        if let route = ipv4.first(where: { $0.destination == "default" && $0.device != selectedDevice }) {
+            throw SwitchError("检测到另一 IPv4 默认出口：\(route.device) → \(route.gateway)。请断开另一上网连接后重试。")
+        }
+    }
 }
 
 func parseRouteTable(_ text: String) -> [RouteRow] {

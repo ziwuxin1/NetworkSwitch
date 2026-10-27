@@ -1,4 +1,6 @@
-# NetworkSwitch for macOS — 1.0.0 beta 1
+# NetworkSwitch for macOS — 1.0.0 beta 2
+
+本版修复把 IPv6 `utun` 默认路由直接判定为 VPN 的误报。IPv6 路由不阻止 IPv4 切换；真实的 IPv4 半默认路由和其他网卡默认出口仍会阻止切换，并显示具体接口与网关。无需删除系统接口或关闭 IPv6。
 
 原生 AppKit 窗口和菜单栏程序。支持 macOS 13 或更新系统，Apple 芯片和 Intel 共用一个 Universal 应用。无需 Python、Homebrew 或 PowerShell。
 

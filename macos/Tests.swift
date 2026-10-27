@@ -124,6 +124,48 @@ final class FakeNetwork: NetworkBackend {
         """)
         check(rows.count == 4 && rows.filter { $0.halfDefault }.count == 2, "Darwin netstat half-default formats are parsed")
         check(rows[0].device == "en0", "Route interface uses header position, not the expiring column")
+        let homeV4 = parseRouteTable("""
+        Destination        Gateway            Flags        Netif Expire
+        default            192.168.1.1        UGScg          en0
+        192.168.1          link#6             UCS            en0
+        """)
+        let systemV6 = parseRouteTable("""
+        Destination        Gateway                        Flags        Netif Expire
+        default            fe80::1%en0                   UGcIg          en0
+        default            fe80::%utun0                  UGcIg         utun0
+        default            fe80::%utun1                  UGcIg         utun1
+        ::/1               fe80::%utun2                  UGcIg         utun2
+        8000::/1           fe80::%utun2                  UGcIg         utun2
+        """)
+        try NetworkRoutes(ipv4: homeV4, ipv6: systemV6).validateIPv4Switch(selectedDevice: "en0")
+        check(true, "IPv6 utun defaults and split routes do not block a normal IPv4 home connection")
+        let splitV4 = parseRouteTable("""
+        Destination        Gateway            Flags        Netif Expire
+        default            192.168.1.1        UGScg          en0
+        0/1                10.8.0.1           UGSc          utun4
+        128.0/1            10.8.0.1           UGSc          utun4
+        """)
+        rejects("Actual IPv4 tunnel split routes remain blocked with benign IPv6 tunnels present") {
+            try NetworkRoutes(ipv4: splitV4, ipv6: systemV6).validateIPv4Switch(selectedDevice: "en0")
+        }
+        let tunnelDefault = [RouteRow(destination: "default", gateway: "10.8.0.1", device: "utun4")]
+        rejects("Actual IPv4 tunnel default remains blocked") {
+            try NetworkRoutes(ipv4: homeV4 + tunnelDefault, ipv6: []).validateIPv4Switch(selectedDevice: "en0")
+        }
+        let secondNIC = [RouteRow(destination: "default", gateway: "192.168.1.1", device: "en5")]
+        rejects("Another physical IPv4 default is still identified as a conflicting connection") {
+            try NetworkRoutes(ipv4: homeV4 + secondNIC, ipv6: systemV6).validateIPv4Switch(selectedDevice: "en0")
+        }
+        do {
+            try NetworkRoutes(ipv4: tunnelDefault, ipv6: []).validateIPv4Switch(selectedDevice: "en0")
+            fatalError("Missing route conflict")
+        } catch {
+            check(error.localizedDescription.contains("utun4") && error.localizedDescription.contains("10.8.0.1") &&
+                  !error.localizedDescription.contains("VPN"), "Conflict reports observed route details without claiming installed VPN software")
+        }
+        let localTunnel = [RouteRow(destination: "10.20/16", gateway: "link#15", device: "utun7")]
+        try NetworkRoutes(ipv4: homeV4 + localTunnel, ipv6: []).validateIPv4Switch(selectedDevice: "en0")
+        check(true, "A tunnel name or narrow local route alone is not an IPv4 default-route conflict")
         let good = try net.preflight(net.id)
         check(good.eligible, "Home DHCP interface is eligible")
         let manual = ServiceInfo(id: net.id, name: "Ethernet", device: "en0", addresses: ["192.168.1.25"], masks: ["255.255.255.0"], dhcp: false, router: "", dns: [])

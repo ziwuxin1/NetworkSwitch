@@ -2,7 +2,7 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 OUT="$ROOT/build"
-VERSION="1.0.0-beta.1"
+VERSION="1.0.0-beta.2"
 APP="$OUT/NetworkSwitch.app"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$OUT/AppIcon.iconset"
 SDK="$(xcrun --sdk macosx --show-sdk-path)"

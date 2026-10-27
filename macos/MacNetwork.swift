@@ -201,21 +201,17 @@ final class MacNetwork: NetworkBackend {
             throw SwitchError("仅支持通过 DHCP 连接 192.168.1.x/24 的家庭以太网或 Wi-Fi。")
         }
         let primary = state("State:/Network/Global/IPv4")["PrimaryService"] as? String
-        try require(primary == serviceID, "请选择当前主上网网卡，并断开其他上网网卡或 VPN。")
+        try require(primary == serviceID, "所选网卡不是当前 IPv4 主出口，请选择正在上网的网卡。")
         for s in currentServices() where SCNetworkServiceGetEnabled(s) {
             guard let id = SCNetworkServiceGetServiceID(s) as String? else { continue }
             if let ip = try? config(id, kSCNetworkProtocolTypeIPv4),
                let routes = ip["AdditionalRoutes"] as? [[String: String]] {
-                try require(!Settings(routes: routes, dns: nil).hasHalfDefault, "检测到已有持久半默认路由，请先关闭 VPN 或处理原路由。")
+                try require(!Settings(routes: routes, dns: nil).hasHalfDefault, "网络服务中已有持久 IPv4 半默认路由，请先处理原路由。")
             }
         }
         let v4 = parseRouteTable(try command("/usr/sbin/netstat", ["-rn", "-f", "inet"]))
         let v6 = parseRouteTable(try command("/usr/sbin/netstat", ["-rn", "-f", "inet6"]))
-        try require(!v4.contains { $0.halfDefault || ($0.destination == "default" && $0.device != selected.device) },
-                    "检测到 VPN 路由或其他网卡的默认路由，请先断开。")
-        try require(!(v4 + v6).contains { $0.device.hasPrefix("utun") &&
-                    ($0.destination == "default" || $0.halfDefault || $0.destination == "::/1" || $0.destination == "8000::/1") },
-                    "检测到 VPN/TUN 出口，请先退出电脑上的 VPN。")
+        try NetworkRoutes(ipv4: v4, ipv6: v6).validateIPv4Switch(selectedDevice: selected.device)
         let proxies = SCDynamicStoreCopyProxies(dynamic) as? [String: Any] ?? [:]
         let enabledKeys = ["HTTPEnable", "HTTPSEnable", "SOCKSEnable", "ProxyAutoConfigEnable", "ProxyAutoDiscoveryEnable"]
         let serviceProxies = (try? config(serviceID, kSCNetworkProtocolTypeProxies)) ?? [:]
