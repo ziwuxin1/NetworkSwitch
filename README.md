@@ -10,14 +10,14 @@
 </p>
 
 <p align="center">
-  <a href="NetworkSwitch-v2.1.1.zip"><img src="badge-version.svg" alt="Version v2.1.1"></a>
+  <a href="https://github.com/ziwuxin1/NetworkSwitch/releases/tag/v2.1.1"><img src="badge-version.svg" alt="Version v2.1.1"></a>
   <img src="badge-platform.svg" alt="Platform Windows">
   <img src="badge-ui.svg" alt="UI WinForms">
   <img src="badge-private.svg" alt="Private repository">
 </p>
 
 <p align="center">
-  <a href="#下载">下载程序</a> ·
+  <a href="https://github.com/ziwuxin1/NetworkSwitch/releases/latest">下载程序</a> ·
   <a href="#快速开始">快速开始</a> ·
   <a href="#功能一览">功能一览</a> ·
   <a href="#开发与构建">开发与构建</a> ·
@@ -53,15 +53,15 @@
 
 ## 下载
 
-**[下载 NetworkSwitch v2.1.1 完整包](NetworkSwitch-v2.1.1.zip?raw=true)**
+**[下载 NetworkSwitch v2.1.1 完整包](https://github.com/ziwuxin1/NetworkSwitch/releases/download/v2.1.1/NetworkSwitch-v2.1.1.zip)**
 
 | 文件 | 用途 |
 | --- | --- |
-| [NetworkSwitch-v2.1.1.zip](NetworkSwitch-v2.1.1.zip?raw=true) | 推荐下载，包含 EXE、中文使用说明和完整源码。 |
-| [NetworkSwitch-Cyber-v2.1.1.exe](NetworkSwitch-Cyber-v2.1.1.exe?raw=true) | 独立程序，下载后直接运行。 |
+| [NetworkSwitch-v2.1.1.zip](https://github.com/ziwuxin1/NetworkSwitch/releases/download/v2.1.1/NetworkSwitch-v2.1.1.zip) | 推荐下载，包含 EXE、中文使用说明和完整源码。 |
+| [NetworkSwitch-Cyber-v2.1.1.exe](https://github.com/ziwuxin1/NetworkSwitch/releases/download/v2.1.1/NetworkSwitch-Cyber-v2.1.1.exe) | 独立程序，下载后直接运行。 |
 | [source/](source/) | 在线查看源码、构建脚本、图标和模拟测试。 |
 
-此仓库为私有仓库，下载需要登录具有访问权限的 GitHub 账号。当前下载文件保存在仓库中。
+此仓库为私有仓库，下载需要登录具有访问权限的 GitHub 账号。正式版本及校验文件见 [Releases](https://github.com/ziwuxin1/NetworkSwitch/releases/latest)。
 
 ## 快速开始
 
@@ -121,3 +121,4 @@ NetworkSwitch-Cyber-v2.1.1.exe
 | **v2.1.1** | 当前打包版本，包含 Cyberpunk 界面、内嵌 Logo、自定义深色下拉框和调整后的版本号位置；保留已确认可用的网关切换与恢复逻辑。 |
 
 本次 README 更新仅整理项目展示与使用文档，程序版本与网络行为保持不变。
+
